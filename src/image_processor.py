@@ -3,9 +3,14 @@
 """
 
 import os
+import sys
+# 添加src目录到Python路径，以便导入自定义模块
+sys.path.append(os.path.join(os.path.dirname(__file__)))
+
 from PIL import Image
 from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.utils.units import pixels_to_EMU, cm_to_EMU
+from image_path_resolver import ImagePathResolver
 
 class ImageProcessor:
     """图片处理器类"""
@@ -20,6 +25,9 @@ class ImageProcessor:
         self.image_base_path = image_base_path
         self.target_width_cm = 0.9  # 目标宽度（厘米）
         self.target_height_cm = 0.9  # 目标高度（厘米）
+        
+        # 初始化图片路径解析器
+        self.image_path_resolver = ImagePathResolver("../images/image_mapping.json")
         
         # 设备名称到图片文件的映射
         self.device_image_mapping = {
@@ -58,6 +66,23 @@ class ImageProcessor:
         
         return None
     
+    def get_device_image_path_by_pdid(self, pdid):
+        """
+        根据PDID获取设备图片路径
+        
+        Args:
+            pdid: 产品ID
+            
+        Returns:
+            str: 图片文件路径，如果不存在返回None
+        """
+        if not pdid:
+            return None
+            
+        # 使用图片路径解析器根据PDID查找图片路径
+        image_path = self.image_path_resolver.get_image_path_by_pdid(pdid)
+        return image_path
+    
     def resize_image_to_cm(self, image_path, target_width_cm=None, target_height_cm=None):
         """
         将图片调整为指定厘米尺寸
@@ -88,19 +113,32 @@ class ImageProcessor:
         
         return resized_image
     
-    def create_excel_image(self, device_name, temp_dir="temp_images"):
+    def create_excel_image(self, device_name, pdid=None, temp_dir="temp_images"):
         """
         为Excel创建图片对象
         
         Args:
             device_name: 设备名称
+            pdid: 产品ID（可选，优先使用PDID查找图片）
             temp_dir: 临时文件目录
             
         Returns:
             ExcelImage: Excel图片对象，如果图片不存在返回None
         """
-        # 获取图片路径
-        image_path = self.get_device_image_path(device_name)
+        # 优先使用PDID查找图片路径
+        image_path = None
+        if pdid:
+            image_path = self.get_device_image_path_by_pdid(pdid)
+            if image_path:
+                print(f"   🎯 通过PDID {pdid} 找到图片: {image_path}")
+        
+        # 如果没有PDID或PDID未找到图片，则使用设备名称查找
+        if not image_path:
+            image_path = self.get_device_image_path(device_name)
+            if image_path:
+                print(f"   🔍 通过设备名称 {device_name} 找到图片: {image_path}")
+        
+        # 如果都找不到图片，返回None
         if not image_path:
             return None
         
@@ -112,7 +150,7 @@ class ImageProcessor:
         resized_image = self.resize_image_to_cm(image_path)
         
         # 保存临时文件
-        temp_image_path = os.path.join(temp_dir, f"{device_name.replace(' ', '_')}.png")
+        temp_image_path = os.path.join(temp_dir, f"{device_name.replace(' ', '_')}_{pdid if pdid else 'default'}.png")
         resized_image.save(temp_image_path)
         
         # 创建Excel图片对象

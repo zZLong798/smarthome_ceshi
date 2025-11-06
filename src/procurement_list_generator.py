@@ -2,14 +2,20 @@
 采购清单生成器模块 - 根据设备统计报告生成采购清单
 支持所有设备类型，包括智能开关、中控屏、智能窗帘等
 集成图片处理和格式美化功能
+支持生成包含DISPIMG公式的Excel文件
 """
 
 import json
 import pandas as pd
 from typing import Dict, List, Any
 from datetime import datetime
+import sys
+import os
+# 添加src目录到Python路径
+sys.path.append(os.path.join(os.path.dirname(__file__)))
 from image_processor import ImageProcessor
 from excel_formatter import ExcelFormatter
+from excel_image_replacer import ExcelImageReplacer
 
 
 class ProcurementListGenerator:
@@ -175,6 +181,9 @@ class ProcurementListGenerator:
                             product_link = self.device_links[brand][device_key]
                             break
                 
+                # 获取设备的PDID（需要从原始统计数据中查找）
+                device_pdid = self._find_device_pdid(statistics_data, brand, device_name, specification)
+                
                 # 构建采购清单项
                 procurement_item = {
                     '设备品类': device_category,
@@ -187,13 +196,45 @@ class ProcurementListGenerator:
                     '小计': subtotal,
                     '产品图片': '',  # 图片将在保存时动态添加
                     '备注': specification,
-                    '产品链接': product_link
+                    '产品链接': product_link,
+                    'pdid': device_pdid  # 添加PDID字段
                 }
                 
                 procurement_list.append(procurement_item)
                 print(f"      ✅ 添加设备: {brand} {device_name} x {count}个 (单价: {unit_price}元)")
         
         return procurement_list
+    
+    def _find_device_pdid(self, statistics_data: Dict[str, Any], brand: str, device_name: str, specification: str) -> str:
+        """
+        根据品牌、设备名称和规格查找设备的PDID
+        
+        Args:
+            statistics_data: 设备统计数据
+            brand: 品牌
+            device_name: 设备名称
+            specification: 规格
+            
+        Returns:
+            str: 设备的PDID，如果未找到返回空字符串
+        """
+        # 从设备统计报告中查找PDID
+        device_count_data = statistics_data.get('device_count', {})
+        
+        # 遍历所有设备，查找匹配的设备
+        for pdid, device_info in device_count_data.items():
+            if (device_info.get('品牌') == brand and 
+                device_info.get('设备名称') == device_name and 
+                device_info.get('主规格') == specification):
+                return str(pdid)
+        
+        # 如果没有精确匹配，尝试部分匹配
+        for pdid, device_info in device_count_data.items():
+            if (device_info.get('品牌') == brand and 
+                device_info.get('设备名称') == device_name):
+                return str(pdid)
+        
+        return ""
     
     def add_summary_rows(self, procurement_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -244,13 +285,15 @@ class ProcurementListGenerator:
         return procurement_list
     
     def save_procurement_list(self, procurement_list: List[Dict[str, Any]], 
-                            output_path: str = "智能开关采购清单.xlsx") -> bool:
+                            output_path: str = "智能开关采购清单.xlsx",
+                            use_dispimg_formulas: bool = False) -> bool:
         """
         保存采购清单到Excel文件，集成图片插入和格式美化
         
         Args:
             procurement_list: 采购清单数据
             output_path: 输出文件路径
+            use_dispimg_formulas: 是否使用DISPIMG公式而不是直接嵌入图片
             
         Returns:
             bool: 是否保存成功
@@ -266,8 +309,12 @@ class ProcurementListGenerator:
                 # 获取工作表
                 worksheet = writer.sheets['采购清单']
                 
-                # 插入设备图片
-                self.insert_device_images(worksheet, procurement_list)
+                if use_dispimg_formulas:
+                    # 使用DISPIMG公式
+                    self.insert_dispimg_formulas(worksheet, procurement_list)
+                else:
+                    # 直接插入设备图片
+                    self.insert_device_images(worksheet, procurement_list)
                 
                 # 应用格式美化
                 self.excel_formatter.format_worksheet(worksheet)
@@ -276,6 +323,25 @@ class ProcurementListGenerator:
                 self.excel_formatter.format_hyperlink_cells(worksheet)
             
             print(f"💾 采购清单已保存至: {output_path}")
+            
+            # 如果使用了DISPIMG公式，使用图片替换器进行替换
+            if use_dispimg_formulas:
+                print("🔄 开始替换DISPIMG公式为嵌入图片...")
+                replacer = ExcelImageReplacer()
+                output_with_images = output_path.replace('.xlsx', '_with_images.xlsx')
+                success = replacer.replace_dispimg_formulas(
+                    excel_path=output_path,
+                    output_path=output_with_images,
+                    pdid_column="A",  # PDID在A列
+                    image_column="I",  # 图片在I列
+                    start_row=2       # 从第2行开始（第1行是标题）
+                )
+                
+                if success:
+                    print(f"✅ 图片替换完成，最终文件: {output_with_images}")
+                else:
+                    print("⚠️ 图片替换失败，保留原始DISPIMG公式文件")
+            
             return True
             
         except Exception as e:
@@ -304,9 +370,10 @@ class ProcurementListGenerator:
             
             device_name = item['设备']
             brand = item['品牌']
+            pdid = item.get('pdid', '')  # 获取PDID
             
-            # 创建Excel图片对象
-            excel_image = self.image_processor.create_excel_image(device_name)
+            # 创建Excel图片对象，传递PDID参数
+            excel_image = self.image_processor.create_excel_image(device_name, pdid)
             
             if excel_image:
                 # 设置图片位置
@@ -315,14 +382,48 @@ class ProcurementListGenerator:
                 
                 # 添加到工作表
                 worksheet.add_image(excel_image)
-                print(f"   ✅ 插入图片: {brand} {device_name} 到 {cell_ref}")
+                print(f"   ✅ 插入图片: {brand} {device_name} (PDID: {pdid}) 到 {cell_ref}")
             else:
-                print(f"   ⚠️  未找到图片: {brand} {device_name}")
+                print(f"   ⚠️  未找到图片: {brand} {device_name} (PDID: {pdid})")
             
             image_row += 1
         
         # 清理临时文件
         self.image_processor.cleanup_temp_files()
+
+    def insert_dispimg_formulas(self, worksheet, procurement_list):
+        """
+        插入DISPIMG公式到Excel工作表
+        
+        Args:
+            worksheet: Excel工作表对象
+            procurement_list: 采购清单数据
+        """
+        print("📝 开始插入DISPIMG公式...")
+        
+        # 从第2行开始（第1行是标题）
+        for row_idx, device_data in enumerate(procurement_list, start=2):
+            # 跳过汇总行
+            if device_data.get("设备名称", "").startswith("合计"):
+                continue
+                
+            # 获取PDID
+            pdid = device_data.get("PDID", "")
+            if not pdid:
+                continue
+                
+            # 在I列插入DISPIMG公式
+            try:
+                cell_ref = f"I{row_idx}"
+                # 创建WPS DISPIMG公式
+                dispimg_formula = f'=DISPIMG("{pdid}", 1)'
+                worksheet[cell_ref] = dispimg_formula
+                print(f"   ✅ 已插入DISPIMG公式到 {cell_ref}: {dispimg_formula}")
+                    
+            except Exception as e:
+                print(f"   ❌ 插入DISPIMG公式失败 (PDID: {pdid}): {e}")
+        
+        print("✅ DISPIMG公式插入完成")
     
     def generate_procurement_report(self, statistics_report_path: str = "device_statistics_report.json",
                                  output_path: str = "智能设备采购清单.xlsx") -> bool:
@@ -336,7 +437,7 @@ class ProcurementListGenerator:
         Returns:
             bool: 是否生成成功
         """
-        print("🚀 开始生成智能设备采购清单...")
+        print("[START] 开始生成智能设备采购清单...")
         
         # 1. 加载设备统计数据
         statistics_data = self.load_statistics_data(statistics_report_path)
@@ -347,7 +448,7 @@ class ProcurementListGenerator:
         # 2. 生成所有设备采购清单
         procurement_list = self.generate_device_procurement_list(statistics_data)
         if not procurement_list:
-            print("⚠️ 未生成任何采购清单项")
+            print("[WARN] 未生成任何采购清单项")
             return False
         
         # 3. 添加汇总行
@@ -357,10 +458,10 @@ class ProcurementListGenerator:
         success = self.save_procurement_list(procurement_list, output_path)
         
         if success:
-            print("🎉 智能设备采购清单生成完成！")
-            print(f"📊 生成采购清单项: {len(procurement_list) - 2} 个设备")
+            print("[SUCCESS] 智能设备采购清单生成完成！")
+            print(f"[INFO] 生成采购清单项: {len(procurement_list) - 2} 个设备")
             total_amount = procurement_list[-1]['小计'] if procurement_list else 0
-            print(f"💰 采购总金额: {total_amount:.2f} 元")
+            print(f"[INFO] 采购总金额: {total_amount:.2f} 元")
         
         return success
 

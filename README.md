@@ -25,7 +25,11 @@ smarthome/
 │   ├── device_inventory_report.py     # 设备清单报告模块
 │   ├── pdid_analysis_main.py          # 主分析程序
 │   ├── pdid_integration_test.py       # PDID集成测试
-│   └── integration_test.py            # 系统集成测试
+│   ├── integration_test.py            # 系统集成测试
+│   ├── procurement_list_generator.py  # 采购清单生成器（支持图片嵌入）
+│   ├── excel_image_replacer.py        # Excel图片替换器
+│   ├── image_processor.py             # 图片处理器
+│   └── image_path_resolver.py         # 图片路径解析器
 ├── tools/                  # 工具脚本
 │   ├── check_mold_gallery.py          # 模具检查
 │   ├── check_template.py              # 模板检查
@@ -77,6 +81,25 @@ python device_inventory_report.py
 python pdid_integration_test.py
 ```
 
+### 图片嵌入功能
+
+#### 1. 生成包含DISPIMG公式的采购清单
+```bash
+cd src
+python procurement_list_generator.py --use-dispimg-formulas
+```
+
+#### 2. 替换DISPIMG公式为嵌入图片
+```bash
+python excel_image_replacer.py --input 采购清单.xlsx --output 采购清单_带图片.xlsx
+```
+
+#### 3. 运行图片嵌入功能测试
+```bash
+cd test/图片嵌入功能测试
+python test_image_embedding.py
+```
+
 ### 原有功能
 
 #### 1. Excel到PPT模具库转换
@@ -112,6 +135,12 @@ python smart_switch_marker.py```-c "from ppt_to_excel_bridge import PPTtoExcelBr
 - **设备清单生成**: 创建详细的设备清单报告
 - **集成测试**: 完整的端到端测试框架
 
+### 图片嵌入功能
+- **DISPIMG公式替换**: 将Excel中的WPS特定函数=DISPIMG(...)替换为嵌入单元格的本地图片
+- **智能图片映射**: 基于PDID自动查找对应的设备图片
+- **图片尺寸优化**: 自动调整图片尺寸以适应Excel单元格
+- **批量处理**: 支持批量替换多个Excel文件中的图片公式
+
 ### 原有功能
 - **智能模具库**: 9种标准智能家居产品模具
 - **自动识别**: 基于智能标记的产品识别
@@ -136,5 +165,6 @@ python smart_switch_marker.py```-c "from ppt_to_excel_bridge import PPTtoExcelBr
 
 ## 更新日志
 
-- 2024年: 项目重构，目录结构优化
-- 初始版本: 智能家居模具库开发完成
+- **2024年12月**: 新增图片嵌入功能，支持将WPS DISPIMG公式替换为嵌入图片
+- **2024年**: 项目重构，目录结构优化
+- **初始版本**: 智能家居模具库开发完成

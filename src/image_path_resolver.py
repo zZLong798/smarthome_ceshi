@@ -28,12 +28,12 @@ class ImagePathResolver:
             if os.path.exists(self.mapping_file_path):
                 with open(self.mapping_file_path, 'r', encoding='utf-8') as f:
                     self.mapping_data = json.load(f)
-                print(f"✅ 成功加载映像关系表: {self.mapping_file_path}")
+                print(f"[OK] 成功加载映像关系表: {self.mapping_file_path}")
             else:
-                print(f"⚠️ 映像关系表文件不存在: {self.mapping_file_path}")
+                print(f"[WARN] 映像关系表文件不存在: {self.mapping_file_path}")
                 self.mapping_data = None
         except Exception as e:
-            print(f"❌ 加载映像关系表失败: {e}")
+            print(f"[ERROR] 加载映像关系表失败: {e}")
             self.mapping_data = None
     
     def get_image_path_by_pdid(self, pdid: str) -> Optional[str]:
@@ -84,7 +84,7 @@ class ImagePathResolver:
             真实图片路径，如果找不到则返回None
         """
         if not self.mapping_data:
-            print(f"⚠️ 映像关系表未加载，无法查找设备: {device_name}")
+            print(f"[WARN] 映像关系表未加载，无法查找设备: {device_name}")
             return None
         
         # 在mapping_relationships中查找
@@ -101,13 +101,13 @@ class ImagePathResolver:
                             real_path = os.path.join(project_root, real_path)
                         
                         if os.path.exists(real_path):
-                            print(f"✅ 找到设备 {device_name} 对应的图片: {real_path}")
+                            print(f"[OK] 找到设备 {device_name} 对应的图片: {real_path}")
                             return real_path
                         else:
-                            print(f"⚠️ 设备 {device_name} 对应的图片路径不存在: {real_path}")
+                            print(f"[WARN] 设备 {device_name} 对应的图片路径不存在: {real_path}")
                             return None
         
-        print(f"❌ 未找到设备 {device_name} 对应的图片")
+        print(f"[ERROR] 未找到设备 {device_name} 对应的图片")
         return None
 
 
@@ -129,7 +129,7 @@ def get_image_path(pdid: str = None, device_name: str = None) -> Optional[str]:
     elif device_name:
         return resolver.get_image_path_by_device_name(device_name)
     else:
-        print("❌ 必须提供PDID或设备名称")
+        print("[ERROR] 必须提供PDID或设备名称")
         return None
 
 
