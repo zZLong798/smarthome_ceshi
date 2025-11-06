@@ -329,10 +329,15 @@ class ProcurementListGenerator:
                 print("🔄 开始替换DISPIMG公式为嵌入图片...")
                 replacer = ExcelImageReplacer()
                 output_with_images = output_path.replace('.xlsx', '_with_images.xlsx')
+                
+                # --- [!! 修正 Bug 2 !!] ---
+                # 'pdid' 列在 'L' 列 (第12列), 不是 'A' 列
+                # '产品图片' 列在 'I' 列 (第9列)
+                # -------------------------
                 success = replacer.replace_dispimg_formulas(
                     excel_path=output_path,
                     output_path=output_with_images,
-                    pdid_column="A",  # PDID在A列
+                    pdid_column="L",  # <-- 修正于此 (A -> L)
                     image_column="I",  # 图片在I列
                     start_row=2       # 从第2行开始（第1行是标题）
                 )
@@ -350,7 +355,7 @@ class ProcurementListGenerator:
     
     def insert_device_images(self, worksheet, procurement_list):
         """
-        插入设备图片到Excel工作表
+        插入设备图片到Excel工作表 (直接嵌入模式)
         
         Args:
             worksheet: Excel工作表对象
@@ -360,8 +365,14 @@ class ProcurementListGenerator:
         
         # 图片插入起始位置（第2行开始，I列 - 产品图片列）
         image_row = 2
-        image_col = 9  # I列
+        image_col_letter = "I" # I列
+        image_col_idx = 9      # I列索引
         
+        # --- [!! 修正 Bug 3 !!] ---
+        # 1. 必须设置列宽以容纳图片
+        # -------------------------
+        worksheet.column_dimensions[image_col_letter].width = 25  # 约180像素
+
         for i, item in enumerate(procurement_list):
             # 跳过汇总行
             if item['设备品类'] in ['智能设备总计', '总计']:
@@ -370,16 +381,30 @@ class ProcurementListGenerator:
             
             device_name = item['设备']
             brand = item['品牌']
-            pdid = item.get('pdid', '')  # 获取PDID
+            pdid = item.get('pdid', '')  # 获取PDID (小写, 正确)
             
             # 创建Excel图片对象，传递PDID参数
             excel_image = self.image_processor.create_excel_image(device_name, pdid)
             
             if excel_image:
                 # 设置图片位置
-                cell_ref = f"{chr(64 + image_col)}{image_row}"  # I2, I3, etc.
+                cell_ref = f"{image_col_letter}{image_row}"  # I2, I3, etc.
                 excel_image.anchor = cell_ref
                 
+                # --- [!! 修正 Bug 3 !!] ---
+                # 2. 必须设置行高以容纳图片
+                # -------------------------
+                worksheet.row_dimensions[image_row].height = 80  # 约106像素
+                
+                # (可选) 调整图片大小以适应单元格
+                # 假设 image_processor 已返回 openpyxl Image 对象
+                try:
+                    scale = 80 / excel_image.height 
+                    excel_image.height = 80
+                    excel_image.width = excel_image.width * scale
+                except Exception as e:
+                    print(f"   ⚠️  无法自动缩放图片 {pdid}: {e} (将使用原始尺寸)")
+
                 # 添加到工作表
                 worksheet.add_image(excel_image)
                 print(f"   ✅ 插入图片: {brand} {device_name} (PDID: {pdid}) 到 {cell_ref}")
@@ -404,11 +429,16 @@ class ProcurementListGenerator:
         # 从第2行开始（第1行是标题）
         for row_idx, device_data in enumerate(procurement_list, start=2):
             # 跳过汇总行
-            if device_data.get("设备名称", "").startswith("合计"):
+            if device_data.get("设备名称", "").startswith("合计"): # 注意：您的汇总行设备品类是 '智能设备总计' 和 '总计'
+                continue
+            if device_data.get("设备品类", "") in ['智能设备总计', '总计']:
                 continue
                 
             # 获取PDID
-            pdid = device_data.get("PDID", "")
+            # --- [!! 修正 Bug 1 !!] ---
+            # 键名是 'pdid' (小写), 不是 'PDID' (大写)
+            # -------------------------
+            pdid = device_data.get("pdid", "") # <-- 修正于此 (PDID -> pdid)
             if not pdid:
                 continue
                 
@@ -416,7 +446,10 @@ class ProcurementListGenerator:
             try:
                 cell_ref = f"I{row_idx}"
                 # 创建WPS DISPIMG公式
-                dispimg_formula = f'=DISPIMG("{pdid}", 1)'
+                # 注意：这里插入的是 'pdid' (如 "13"), 
+                # 而不是WPS的 'ID_A640...'。
+                # 这没问题，因为您的 Bug 2 修复后，替换器是按 'pdid' (L列) 工作的。
+                dispimg_formula = f'=DISPIMG("{pdid}", 1)' 
                 worksheet[cell_ref] = dispimg_formula
                 print(f"   ✅ 已插入DISPIMG公式到 {cell_ref}: {dispimg_formula}")
                     
