@@ -203,17 +203,27 @@ class EnhancedProcurementGenerator:
         print("🔗 匹配PDID与模具库产品...")
         
         procurement_list = []
+        # 'product_ids' 列表包含的是从PPT提取的 *短ID* (例如 "13")
         product_ids = self.pdid_data.get('product_ids', [])
+        # 'device_counts' 字典的键也是 *短ID*
         device_counts = self.pdid_data.get('device_counts', {})
         
         matched_count = 0
         
+        # 这里的 'product_id' 是 *短ID*
         for product_id in product_ids:
-            # 从模具库获取产品信息
+            # 从模具库获取产品信息 (模具库加载器使用短ID查询)
             product_info = self.mold_library_loader.get_product_info(product_id)
             
             if product_info:
+                # device_counts 使用 *短ID* 作为键
                 count = device_counts.get(product_id, 1)
+                
+                # --- [!! 关键修复 !!] ---
+                # 我们不再写入 '设备图片' (即 =DISPIMG(...) 公式)
+                # 而是直接写入 *短ID* ('product_id')
+                # 这样 ExcelImageReplacer 才能在 '产品图片' 列找到它
+                # -------------------------
                 
                 # 构建采购清单项
                 procurement_item = {
@@ -225,21 +235,26 @@ class EnhancedProcurementGenerator:
                     '单位': product_info.get('单位', '个'),
                     '单价': product_info.get('单价', 0),
                     '小计': count * product_info.get('单价', 0),
-                    '产品图片': product_info.get('设备图片', ''),
+                    
+                    # 修正于此:
+                    '产品图片': product_id,  # <-- 不再写入公式，而是写入短ID
+                    
                     '备注': product_info.get('主规格', ''),
                     '产品链接': product_info.get('采购链接', ''),
-                    '产品ID': product_id
+                    
+                    # 我们仍然保留 '产品ID' 字段，以防模板中有这一列
+                    # (如果模板中没有，TemplateCopyEngine 会自动忽略它)
+                    '产品ID': product_id  
                 }
                 
                 procurement_list.append(procurement_item)
                 matched_count += 1
-                print(f"   ✅ 匹配产品ID {product_id}: {product_info.get('设备名称', '')} x {count}个")
+                print(f"   ✅ 匹配产品ID {product_id}: {product_info.get('设备名称', '')} x {count}个 (准备写入短ID: {product_id})")
             else:
                 print(f"   ⚠️ 未找到产品ID {product_id} 的模具库信息")
         
         print(f"📊 PDID匹配完成：成功匹配 {matched_count}/{len(product_ids)} 个产品")
         return procurement_list
-    
     def generate_procurement_list(self, template_path: str, mold_library_path: str, 
                                  ppt_file_path: str, output_path: str) -> Tuple[bool, List[str]]:
         """

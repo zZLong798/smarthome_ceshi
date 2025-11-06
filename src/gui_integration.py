@@ -10,6 +10,9 @@ import sys
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from excel_image_replacer import ExcelImageReplacer
+from enhanced_procurement_generator import EnhancedProcurementGenerator
+
 
 # 添加src目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -104,105 +107,80 @@ class GUIIntegration:
                 'error': str(e)
             }
     
-    def generate_procurement_list(self, ppt_file_path: str, template_file_path: str = None, 
-                                mold_library_file_path: str = None, output_filename: str = "采购清单") -> Dict[str, Any]:
+    def generate_procurement_list(self, ppt_file_path: str, template_file_path: str, 
+                                 mold_library_file_path: str, custom_filename: str) -> Dict[str, Any]:
         """
-        生成采购清单Excel文件
+        生成采购清单的核心逻辑
         
         Args:
-            ppt_file_path: PPT智能家居方案文件路径
-            template_file_path: 采购清单模板文件路径
-            mold_library_file_path: 模具库Excel文件路径
-            output_filename: 输出文件名（不含扩展名）
+            ppt_file_path: PPT文件路径
+            template_file_path: 模板文件路径
+            mold_library_file_path: 模具库文件路径
+            custom_filename: 自定义输出文件名 (不含.xlsx)
             
         Returns:
-            Dict[str, Any]: 生成结果信息
+            Dict[str, Any]: 包含成功状态和文件路径的字典
         """
         try:
-            # 如果没有提供模板文件，使用默认模板
-            if not template_file_path:
-                template_file_path = os.path.join(self.project_root, '采购清单模板.xlsx')
-            
-            # 如果没有提供模具库文件，使用默认模具库
-            if not mold_library_file_path:
-                mold_library_file_path = os.path.join(self.project_root, '智能家居模具库.xlsx')
-            
-            # 首先分析PPT文件，生成设备统计报告
-            from smart_analyze_plan import smart_analyze_smart_home_plan
-            
-            # 分析PPT文件
-            device_count, total_devices = smart_analyze_smart_home_plan(ppt_file_path)
-            
-            if not device_count:
-                return {
-                    'success': False,
-                    'message': '分析PPT文件失败：未识别到任何设备',
-                    'output_file': None
-                }
-            
-            # 生成设备统计报告
-            statistics_report = {
-                'total_devices': total_devices,
-                'device_count': device_count,
-                'category_stats': {}
-            }
-            
-            # 按设备品类分组统计
-            for product_id, info in device_count.items():
-                category = info['设备品类']
-                if category not in statistics_report['category_stats']:
-                    statistics_report['category_stats'][category] = []
-                
-                statistics_report['category_stats'][category].append({
-                    'brand': info['品牌'],
-                    'device_name': info['设备名称'],
-                    'specification': info['主规格'],
-                    'count': info['数量'],
-                    'unit_price': info['单价']
-                })
-            
-            # 保存统计报告
-            report_file = os.path.join(self.project_root, 'device_statistics_report.json')
-            with open(report_file, 'w', encoding='utf-8') as f:
-                json.dump(statistics_report, f, ensure_ascii=False, indent=2)
-            
-            # 使用增强采购清单生成器
-            from enhanced_procurement_generator import EnhancedProcurementGenerator
-            
-            # 创建生成器实例
+            # 1. 初始化增强型采购清单生成器
             generator = EnhancedProcurementGenerator()
             
-            # 生成采购清单
-            success, errors = generator.generate_procurement_list(
+            # 确定输出路径
+            base_dir = os.path.dirname(ppt_file_path)
+            output_filename = f"{custom_filename}.xlsx"
+            output_file_path = os.path.join(base_dir, output_filename)
+            
+            # 2. 调用生成器生成 *包含DISPIMG公式* 的Excel文件
+            success, errors = generator.generate_enhanced_procurement_list(
                 template_path=template_file_path,
                 mold_library_path=mold_library_file_path,
                 ppt_file_path=ppt_file_path,
-                output_path=os.path.join(self.project_root, f'{output_filename}.xlsx')
+                output_path=output_file_path
             )
             
-            if success:
-                output_file = os.path.join(self.project_root, f'{output_filename}.xlsx')
+            if not success:
+                error_msg = "\\n".join(errors) if errors else "未知错误"
+                return {'success': False, 'message': f"生成采购清单失败: {error_msg}"}
+            
+            print(f"✅ 成功生成带DISPIMG公式的Excel文件: {output_file_path}")
+            
+            # --- [!! 关键修复 !!] ---
+            # 3. 调用 ExcelImageReplacer 替换 DISPIMG 公式为真实图片
+            # -------------------------
+            print("🔄 开始替换DISPIMG公式为嵌入图片...")
+            replacer = ExcelImageReplacer()
+            
+            # 定义最终带图片的文件路径
+            output_with_images_path = output_file_path.replace('.xlsx', '_with_images.xlsx')
+            
+            # 使用我们之前确认过的正确列名 "L" 和 "I"
+            replace_success = replacer.replace_dispimg_formulas(
+                excel_path=output_file_path,
+                output_path=output_with_images_path,
+                pdid_column="I",    # <-- 必须是 "I"
+                image_column="I",  # <-- 图片在 'I' 列，# <-- 必须是 "I"
+                start_row=2       
+            )
+            
+            if not replace_success:
+                print("⚠️ 图片替换失败，返回原始DISPIMG文件")
+                # 即使替换失败，也返回成功（但返回的是原始文件）
                 return {
-                    'success': True,
-                    'message': '采购清单生成成功',
-                    'output_file': output_file,
-                    'file_size': os.path.getsize(output_file) if os.path.exists(output_file) else 0
+                    'success': True, 
+                    'output_file': output_file_path,
+                    'message': '采购清单生成成功，但图片替换失败'
                 }
-            else:
-                return {
-                    'success': False,
-                    'message': '采购清单生成失败',
-                    'output_file': None
-                }
+
+            print(f"✅ 图片替换完成，最终文件: {output_with_images_path}")
+            
+            # 4. 返回 *包含图片* 的最终文件路径
+            return {
+                'success': True,
+                'output_file': output_with_images_path
+            }
             
         except Exception as e:
-            return {
-                'success': False,
-                'message': f'生成采购清单失败: {str(e)}',
-                'output_file': None,
-                'error': str(e)
-            }
-    
+            return {'success': False, 'message': f"生成采购清单时发生严重错误: {e}"}
     def get_template_info(self) -> Dict[str, Any]:
         """
         获取模板文件信息
