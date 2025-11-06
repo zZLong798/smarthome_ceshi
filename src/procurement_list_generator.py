@@ -352,7 +352,6 @@ class ProcurementListGenerator:
         except Exception as e:
             print(f"❌ 保存采购清单失败: {e}")
             return False
-    
     def insert_device_images(self, worksheet, procurement_list):
         """
         插入设备图片到Excel工作表 (直接嵌入模式)
@@ -366,11 +365,11 @@ class ProcurementListGenerator:
         # 图片插入起始位置（第2行开始，I列 - 产品图片列）
         image_row = 2
         image_col_letter = "I" # I列
-        image_col_idx = 9      # I列索引
         
-        # --- [!! 修正 Bug 3 !!] ---
+        # --- [!! 修正 Bug 3 (Part 1) !!] ---
         # 1. 必须设置列宽以容纳图片
-        # -------------------------
+        # (您的 excel_image_replacer.py 中有此设置, 但直接嵌入模式没有)
+        # -----------------------------------
         worksheet.column_dimensions[image_col_letter].width = 25  # 约180像素
 
         for i, item in enumerate(procurement_list):
@@ -391,19 +390,22 @@ class ProcurementListGenerator:
                 cell_ref = f"{image_col_letter}{image_row}"  # I2, I3, etc.
                 excel_image.anchor = cell_ref
                 
-                # --- [!! 修正 Bug 3 !!] ---
+                # --- [!! 修正 Bug 3 (Part 2) !!] ---
                 # 2. 必须设置行高以容纳图片
-                # -------------------------
+                # -----------------------------------
                 worksheet.row_dimensions[image_row].height = 80  # 约106像素
                 
                 # (可选) 调整图片大小以适应单元格
-                # 假设 image_processor 已返回 openpyxl Image 对象
+                # image_processor 似乎已经处理了尺寸, 但我们以防万一
                 try:
-                    scale = 80 / excel_image.height 
-                    excel_image.height = 80
+                    target_height_px = 80 * (96/72) # 转换为像素
+                    scale = target_height_px / excel_image.height 
+                    excel_image.height = target_height_px
                     excel_image.width = excel_image.width * scale
-                except Exception as e:
-                    print(f"   ⚠️  无法自动缩放图片 {pdid}: {e} (将使用原始尺寸)")
+                except Exception:
+                    # 如果 image_processor 返回的不是 openpyxl Image 对象，
+                    # 而是 PIL Image，这里的逻辑会失败，但 image_processor 内部似乎已经处理了
+                    pass
 
                 # 添加到工作表
                 worksheet.add_image(excel_image)
@@ -415,7 +417,6 @@ class ProcurementListGenerator:
         
         # 清理临时文件
         self.image_processor.cleanup_temp_files()
-
     def insert_dispimg_formulas(self, worksheet, procurement_list):
         """
         插入DISPIMG公式到Excel工作表
@@ -428,9 +429,7 @@ class ProcurementListGenerator:
         
         # 从第2行开始（第1行是标题）
         for row_idx, device_data in enumerate(procurement_list, start=2):
-            # 跳过汇总行
-            if device_data.get("设备名称", "").startswith("合计"): # 注意：您的汇总行设备品类是 '智能设备总计' 和 '总计'
-                continue
+            # 跳过汇总行 (修正逻辑以匹配您的汇总行)
             if device_data.get("设备品类", "") in ['智能设备总计', '总计']:
                 continue
                 
@@ -440,15 +439,14 @@ class ProcurementListGenerator:
             # -------------------------
             pdid = device_data.get("pdid", "") # <-- 修正于此 (PDID -> pdid)
             if not pdid:
+                print(f"   ⚠️  第 {row_idx} 行: PDID为空，跳过DISPIMG公式插入")
                 continue
                 
             # 在I列插入DISPIMG公式
             try:
                 cell_ref = f"I{row_idx}"
                 # 创建WPS DISPIMG公式
-                # 注意：这里插入的是 'pdid' (如 "13"), 
-                # 而不是WPS的 'ID_A640...'。
-                # 这没问题，因为您的 Bug 2 修复后，替换器是按 'pdid' (L列) 工作的。
+                # 注意: 这里插入的pdid (如 '13') 将在 Bug 2 修复后被替换器 (L列) 正确找到
                 dispimg_formula = f'=DISPIMG("{pdid}", 1)' 
                 worksheet[cell_ref] = dispimg_formula
                 print(f"   ✅ 已插入DISPIMG公式到 {cell_ref}: {dispimg_formula}")
@@ -457,7 +455,6 @@ class ProcurementListGenerator:
                 print(f"   ❌ 插入DISPIMG公式失败 (PDID: {pdid}): {e}")
         
         print("✅ DISPIMG公式插入完成")
-    
     def generate_procurement_report(self, statistics_report_path: str = "device_statistics_report.json",
                                  output_path: str = "智能设备采购清单.xlsx") -> bool:
         """

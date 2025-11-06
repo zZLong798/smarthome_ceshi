@@ -120,7 +120,7 @@ def test_excel_image_replacer():
         success = replacer.replace_dispimg_formulas(
             excel_path="test_dispimg_formulas.xlsx",
             output_path=output_path,
-            pdid_column="A",
+            pdid_column="L",
             image_column="I",
             start_row=2
         )
